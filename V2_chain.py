@@ -82,17 +82,34 @@ def generateTweet(chain):
         if not key:
             tweet = 'Line:::'
             continue
-            
-        w = random.choice(key)
-          
-        # Remove punctuation-adjacent quotes when necessary
-        prospective = tweet + ' ' + w
         
-        quote_ends = r'[A-Za-z0-9.?!]"'
-        if (prospective.count('"') % 2 != 0):
-            if re.search(quote_ends, w):
-                w = re.sub(quote_ends, lambda m: m.group(0)[0], w)
+        w = random.choice(key)
+        
+        # Remove punctuation-adjacent paired punctuation marks when necessary
+        prospective = tweet + f' {w}'
+        
+        homo_punc = ['"', '\'']   # Homogenous punctuation
+        hetero_punc = [('(', ')'), ('[', ']'), ('{', '}')]   # Heterogenous punctuation
+        
+        for i in homo_punc:
+            punc_ends = fr'?<=[A-Za-z0-9.?!]{re.escape(i)}'
+            if prospective.count(i) % 2 != 0:
+                if re.search(punc_ends, w):
+                    w = re.sub(punc_ends, '', w)   # Removes only the punctuation character
+        
+        for open_char, close_char in hetero_punc:
+            open_count = prospective.count(open_char)
+            close_count = prospective.count(close_char)
             
+            if open_count > close_count:  # More opens than closes
+                punc_start = fr'(?<=[A-Za-z0-9.?!]){re.escape(open_char)}'
+                if re.search(punc_start, w):
+                    w = re.sub(punc_start, '', w)
+            elif close_count > open_count:  # More closes than opens
+                punc_end = fr'{re.escape(close_char)}(?=[A-Za-z0-9.?!])'
+                if re.search(punc_end, w):
+                    w = re.sub(punc_end, '', w)
+
         tweet += f' {w}'
     
         # Adds closing quotes if needed
@@ -122,11 +139,10 @@ print('Chain size: {0} distinct word groups.'.format(len(chain)))
 
 print(generateTweet(chain))
 
+# Repeating and debug utilities
 while True:
     prompt = input("")
-    if prompt == 'stop':
-        break
-    elif prompt == ':::chain':
+    if prompt == ':::chain':
         print(chain)
     elif prompt != '':
         if (prompt) in chain:
