@@ -13,7 +13,7 @@ def fetch_process_data(url):
     for line in text:
         line = line.decode('utf-8').replace('\r', ' ').replace('\n', ' ')
         if line.strip():   # Skips empty lines
-            line = 'Line::: ' + line   # Adds sentinel
+            line = 'Line:: ' + line   # Adds sentinel
             new_words = line.split(' ')
             new_words = [word for word in new_words if word not in ['', ' ']]   # Removes empty strings and spaces
             words += new_words
@@ -37,8 +37,9 @@ def build_chain(words, memory_cap = 1):
         
     return chain
 
+
 # Check for sentence-ending punctuation
-def punctuation_check(text):
+def end_punc_check(text):
     punctuation_symbols = ('.', '!', '?')
     honorifics = {
         'mr.', 'ms.', 'mrs.', 'mx.', 'dr.', 'prof.', 'capt.', 'gen.', 'gov.',
@@ -46,31 +47,81 @@ def punctuation_check(text):
         'b.a.', 'm.a.', 'd.d.s.'
     }
     other_abbreviations = {
-        'etc.', 'a.m.', 'p.m.', '...', 'vol.', 'inc.', 'co.', 'corp.', 'ltd.', 'www.'
+        'etc.', 'a.m.', 'p.m.', 'vol.', 'inc.', 'co.', 'corp.', 'ltd.', 'www.'
     }
+    repeating_symbols = {'.' : 2, ',' : 2}  # Symbol: minimum repetitions
 
     # Trim trailing quotes/brackets
     word = text.strip().rstrip('"\')]}').lower()
 
-    # Excepts honorifics and common abbreviations
+    # Check honorifics and common abbreviations
     if word in honorifics or word in other_abbreviations:
         return False
+    
+    # Check for repeating symbols
+    for symbol, min_count in repeating_symbols.items():
+        if symbol * min_count in word:
+            return False
 
     # True only if the cleaned word ends in . ! or ?
     return word.endswith(punctuation_symbols)
 
 
-# Generate a tweet
-def generateTweet(chain):
+# Filter paired punctuation
+    # Always place pairs that contain another punctuation first
+homo_punc = ['"', '\'', '\\*', '**', '*', '`', '~~', '__', ':']   # Homogenous pairs have identical opens and closes
+hetero_punc = [('(<', '>)'), ('(', ')'), ('[', ']'), ('{', '}')]   # Heterogenous pairs have different opens and closes
+any_text = fr'?<=[A-Za-z0-9.?!]'
+
+def paired_punc_filter(text, w):
+    prospective = text + f' {w}'
+    
+    # Homogenous pairs
+    for i in homo_punc:
+        punc_ends = fr'({any_text}{re.escape(i)})'
+        if prospective.count(i) % 2 != 0:
+            if re.search(punc_ends, w):
+                w = re.sub(punc_ends, '', w)   # Removes only the punctuation character
+    
+    # Heterogenous pairs
+    for open_char, close_char in hetero_punc:
+        open_count = prospective.count(open_char)
+        close_count = prospective.count(close_char)
+        
+        if open_count > close_count + 1:   # Excess opens
+            punc_start = fr'({any_text}){re.escape(open_char)}'
+            if re.search(punc_start, w):
+                w = re.sub(punc_start, '', w)   # Removes only the punctuation character
+                
+        elif close_count > open_count:   # Excess closes
+            punc_end = fr'{re.escape(close_char)}({any_text})'
+            if re.search(punc_end, w):
+                w = re.sub(punc_end, '', w)   # Removes only the punctuation character
+    
+    return w
+
+
+# End with closed punctuation pairs
+def paired_punc_close(text, w):
+    for i in homo_punc:
+        if text.count(i) % 2 != 0 and end_punc_check(w):
+            text += i
+
+
+#-------------------------
+
+
+# Generate text
+def generatetext(chain):
     memory_max = len(list(chain.keys())[-1])
         
     # Start with sentinel
-    tweet = 'Line:::'
+    text = 'Line::'
         
     while True:
         # Select up to the largest possible section of text within 'memory_cap' for as a key candidate
         key = [] 
-        words = tweet.split()
+        words = text.split()
         
         for i in range(1, memory_max + 1):
             if len(words) >= i:
@@ -78,55 +129,30 @@ def generateTweet(chain):
                 if memory in chain:
                     key = (chain[memory])
                 
-        # If no key found, restart tweet generation
+        # If no key found, restart text generation
         if not key:
-            tweet = 'Line:::'
+            text = 'Line::'
             continue
         
-        w = random.choice(key)
-        
-        # Remove punctuation-adjacent paired punctuation marks when necessary
-        prospective = tweet + f' {w}'
-        
-        homo_punc = ['"', '\'']   # Homogenous punctuation
-        hetero_punc = [('(', ')'), ('[', ']'), ('{', '}')]   # Heterogenous punctuation
-        
-        for i in homo_punc:
-            punc_ends = fr'?<=[A-Za-z0-9.?!]{re.escape(i)}'
-            if prospective.count(i) % 2 != 0:
-                if re.search(punc_ends, w):
-                    w = re.sub(punc_ends, '', w)   # Removes only the punctuation character
-        
-        for open_char, close_char in hetero_punc:
-            open_count = prospective.count(open_char)
-            close_count = prospective.count(close_char)
-            
-            if open_count > close_count:  # More opens than closes
-                punc_start = fr'(?<=[A-Za-z0-9.?!]){re.escape(open_char)}'
-                if re.search(punc_start, w):
-                    w = re.sub(punc_start, '', w)
-            elif close_count > open_count:  # More closes than opens
-                punc_end = fr'{re.escape(close_char)}(?=[A-Za-z0-9.?!])'
-                if re.search(punc_end, w):
-                    w = re.sub(punc_end, '', w)
-
-        tweet += f' {w}'
+        w = paired_punc_filter(text, random.choice(key))
+        text += f' {w}'
     
-        # Adds closing quotes if needed
-        if tweet.count('"') % 2 != 0 and punctuation_check(w):
-            tweet += '"'
+
             
         # Break conditions:
         # - if the sentinel appears beyond the starting sentinel
-        # - if the tweet is long and the chosen word ends a sentence
-        if tweet.count('Line:::') > 1 or (len(tweet) > 200 and punctuation_check(w)):
-            tweet = tweet.replace('Line::: ', '').replace('Line:::', '')
-            if tweet.count('"') % 2 != 0:
-                tweet += '"'
-                tweet = tweet[:-2] + tweet[-1]
+        # - if the text is long and the chosen word ends a sentence
+        if text.count('Line::') > 1 or (len(text) > 200 and end_punc_check(w)):
+            text = text.replace('Line:: ', '').replace('Line::', '')
+            if text.count('"') % 2 != 0:
+                text += '"'
+                text = text[:-2] + text[-1]
             break
     
-    return tweet
+    return text
+
+
+#-------------------------
 
 
 # Main execution
@@ -137,17 +163,26 @@ chain = build_chain(words, 3)
 print('Corpus size: {0} words.'.format(len(words)))
 print('Chain size: {0} distinct word groups.'.format(len(chain)))
 
-print(generateTweet(chain))
+print(generatetext(chain))
 
 # Repeating and debug utilities
+data_recall = {
+    'chain': chain,
+    'corpus': words,
+    'url': url
+}
+
 while True:
-    prompt = input("")
-    if prompt == ':::chain':
-        print(chain)
-    elif prompt != '':
-        if (prompt) in chain:
-            print(chain[(prompt)])
+    prompt = input('')
+    
+    # Index search
+    if not re.match('::', prompt) and prompt != '':
+        key = tuple(prompt.split())
+
+        if key in chain:
+            print(f'{key} -> {chain[key]}')
         else:
             print('Index not found')
+
     else:
-        print(generateTweet(chain))
+        print(generatetext(chain))
